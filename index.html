@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Currency Converter</title>
+<style>
+  :root {
+    --bg: #eef3f1;
+    --panel: #ffffff;
+    --ink: #14302b;
+    --muted: #5f7a74;
+    --line: #cfdcd8;
+    --accent: #0f766e;
+    --accent-ink: #ffffff;
+    --warn: #a15c07;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1c19;
+      --panel: #16282499;
+      --ink: #e4f0ed;
+      --muted: #8fa9a3;
+      --line: #2b433e;
+      --accent: #2dd4bf;
+      --accent-ink: #072a25;
+      --warn: #e9b44c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px;
+    background: var(--bg); color: var(--ink);
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+  .app {
+    width: 100%; max-width: 440px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; padding: 26px;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; letter-spacing: -.01em; }
+  .sub { margin: 0 0 22px; color: var(--muted); font-size: .92rem; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
+  .row { display: flex; gap: 10px; }
+  input, select {
+    font: inherit; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; width: 100%;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  select { cursor: pointer; }
+  select option { color: #14302b; }
+  .field { margin-bottom: 16px; }
+  .swap-wrap { display: flex; justify-content: center; margin: -4px 0 12px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--ink); padding: 8px 14px;
+  }
+  button:hover { border-color: var(--accent); }
+  .result {
+    margin-top: 6px; padding: 18px; border-radius: 10px; background: var(--accent); color: var(--accent-ink);
+  }
+  .result .from { font-size: .9rem; opacity: .85; }
+  .result .to { font-size: 2rem; font-weight: 700; margin: 2px 0 4px; word-break: break-all; }
+  .result .rate { font-size: .85rem; opacity: .85; }
+  .status { margin: 14px 0 0; font-size: .8rem; color: var(--muted); }
+  .status.offline { color: var(--warn); }
+  .err { color: var(--warn); font-size: .85rem; min-height: 1.2em; margin: -8px 0 8px; }
+  @media (prefers-reduced-motion: no-preference) {
+    button { transition: border-color .15s; }
+  }
+</style>
+</head>
+<body>
+  <main class="app">
+    <h1>Currency Converter</h1>
+    <p class="sub">USD, EUR, JPY, GBP and CNY.</p>
+
+    <div class="field">
+      <label for="amount">Amount</label>
+      <input id="amount" type="number" inputmode="decimal" min="0" step="any" value="100">
+    </div>
+    <div class="err" id="err" role="alert"></div>
+
+    <div class="row field">
+      <div style="flex:1">
+        <label for="from">From</label>
+        <select id="from"></select>
+      </div>
+      <div style="flex:1">
+        <label for="to">To</label>
+        <select id="to"></select>
+      </div>
+    </div>
+
+    <div class="swap-wrap"><button id="swap" type="button" aria-label="Swap currencies">Swap</button></div>
+
+    <section class="result" aria-live="polite">
+      <div class="from" id="fromText"></div>
+      <div class="to" id="toText"></div>
+      <div class="rate" id="rateText"></div>
+    </section>
+
+    <p class="status" id="status">Loading rates…</p>
+  </main>
+
+<script>
+  const CURRENCIES = {
+    USD: { name: "US Dollar", symbol: "$" },
+    EUR: { name: "Euro", symbol: "€" },
+    JPY: { name: "Japanese Yen", symbol: "¥" },
+    GBP: { name: "British Pound", symbol: "£" },
+    CNY: { name: "Chinese Yuan", symbol: "¥" }
+  };
+
+  // Fallback rates (units per 1 USD), approximate. Replaced by live rates when online.
+  let rates = { USD: 1, EUR: 0.92, JPY: 150, GBP: 0.79, CNY: 7.2 };
+
+  const $ = id => document.getElementById(id);
+  const amountEl = $("amount"), fromEl = $("from"), toEl = $("to");
+
+  Object.entries(CURRENCIES).forEach(([code, c]) => {
+    const label = code + " – " + c.name;
+    fromEl.add(new Option(label, code));
+    toEl.add(new Option(label, code));
+  });
+  fromEl.value = "USD";
+  toEl.value = "EUR";
+
+  function fmt(value, code) {
+    const digits = code === "JPY" ? 0 : 2;
+    return CURRENCIES[code].symbol + value.toLocaleString(undefined, {
+      minimumFractionDigits: digits, maximumFractionDigits: digits
+    });
+  }
+
+  function convert() {
+    const amount = parseFloat(amountEl.value);
+    const from = fromEl.value, to = toEl.value;
+    if (isNaN(amount) || amount < 0) {
+      $("err").textContent = "Enter an amount of 0 or more.";
+      $("fromText").textContent = "";
+      $("toText").textContent = "–";
+      $("rateText").textContent = "";
+      return;
+    }
+    $("err").textContent = "";
+    const rate = rates[to] / rates[from];
+    $("fromText").textContent = fmt(amount, from) + " " + from + " =";
+    $("toText").textContent = fmt(amount * rate, to);
+    $("rateText").textContent = "1 " + from + " = " + rate.toFixed(4) + " " + to;
+  }
+
+  async function loadRates() {
+    const status = $("status");
+    try {
+      const res = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (!res.ok) throw new Error("Bad response");
+      const data = await res.json();
+      Object.keys(CURRENCIES).forEach(c => {
+        if (data.rates && data.rates[c]) rates[c] = data.rates[c];
+      });
+      status.textContent = "Live rates updated " + new Date().toLocaleTimeString();
+      status.className = "status";
+    } catch (e) {
+      status.textContent = "Offline: using approximate saved rates.";
+      status.className = "status offline";
+    }
+    convert();
+  }
+
+  amountEl.addEventListener("input", convert);
+  fromEl.addEventListener("change", convert);
+  toEl.addEventListener("change", convert);
+  $("swap").addEventListener("click", () => {
+    const f = fromEl.value;
+    fromEl.value = toEl.value;
+    toEl.value = f;
+    convert();
+  });
+
+  convert();
+  loadRates();
+</script>
+</body>
+</html>
